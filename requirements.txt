@@ -1,11 +1,10 @@
 streamlit
 pandas
-numpy
-openpyxl
 pdf2docx
 pdf2image
 PyPDF2
 Pillow
 python-docx
 fpdf
-openpyxl 
+openpyxl
+requests
