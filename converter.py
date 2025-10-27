@@ -21,6 +21,7 @@ if sys.platform.startswith("win"):
 
 st.set_page_config(page_title=" MIVI Universal Converter", layout="wide")
 st.title("📂 MIVI Universal File Converter 🗃️")
+st.caption("Developed by **S. Sri Charan**  |  📧 [charan10187@gmail.com](mailto:charan10187@gmail.com)")
 
 tab1, tab2 = st.tabs(["📄 File Converter", "🖼️ Image Resizer"])
 
