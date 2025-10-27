@@ -19,8 +19,8 @@ if sys.platform.startswith("win"):
         os.makedirs(poppler_path, exist_ok=True)
     os.environ["PATH"] += os.pathsep + str(poppler_path)
 
-st.set_page_config(page_title="EZIPZ Universal Converter", layout="wide")
-st.title("📂 EZIPZ Universal File Converter 🗃️")
+st.set_page_config(page_title=" MIVI Universal Converter", layout="wide")
+st.title("📂 MIVI Universal File Converter 🗃️")
 
 tab1, tab2 = st.tabs(["📄 File Converter", "🖼️ Image Resizer"])
 
