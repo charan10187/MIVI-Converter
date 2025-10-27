@@ -1,182 +1,300 @@
+# app.py
 import streamlit as st
+from io import BytesIO
 from PIL import Image
-import io
 from PyPDF2 import PdfReader
 from docx import Document
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 import pandas as pd
 import json
 
-st.set_page_config(page_title="MIVI Universal Converter", page_icon="📁", layout="wide")
-st.title("📂 MIVI Universal File Converter 🗃️")
-st.markdown("Developed by **S. Sri Charan** | 📧 [charan10187@gmail.com](mailto:charan10187@gmail.com)")
-st.markdown("⚠️ **Note:** Only local files are supported. Cloud links (Google Drive, Dropbox, OneDrive) are not accepted — please download them first.")
+st.set_page_config(page_title="MIVI Converter - Rebuilt", page_icon="📁", layout="centered")
+st.title("📂 MIVI Converter")
+st.caption("Developed by S. Sri Charan — rebuilt for submission")
+
+# ---------------------
+# Helpers
+# ---------------------
+def detect_ext(name: str):
+    if not name or "." not in name:
+        return None
+    return name.rsplit(".", 1)[1].lower()
+
+def make_filename(orig_name: str, tag: str, ext: str):
+    base = orig_name.rsplit(".", 1)[0]
+    return f"{base}_{tag}.{ext}"
+
+def bytes_from_uploaded(uploaded):
+    uploaded.seek(0)
+    return uploaded.read()
+
+def pdf_text_from_bytes(pdf_bytes: bytes):
+    reader = PdfReader(BytesIO(pdf_bytes))
+    pages = []
+    for page in reader.pages:
+        pages.append(page.extract_text() or "")
+    return "\n\n".join(pages)
+
+def docx_from_text(text: str) -> bytes:
+    doc = Document()
+    for block in text.split("\n\n"):
+        doc.add_paragraph(block)
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+def pdf_from_text(text: str) -> bytes:
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    lines = text.splitlines()
+    y = height - 40
+    line_height = 12
+    for line in lines:
+        if y < 40:
+            c.showPage()
+            y = height - 40
+        # wrap long lines simply
+        if len(line) > 120:
+            # naive wrap
+            chunks = [line[i:i+120] for i in range(0, len(line), 120)]
+            for ch in chunks:
+                c.drawString(40, y, ch)
+                y -= line_height
+                if y < 40:
+                    c.showPage()
+                    y = height - 40
+        else:
+            c.drawString(40, y, line)
+            y -= line_height
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
+
+# ---------------------
+# UI
+# ---------------------
 tab1, tab2 = st.tabs(["File Converter", "Image Resizer"])
 
-# =======================================
-# FILE CONVERTER TAB
-# =======================================
+# -------- File Converter --------
 with tab1:
     st.subheader("Smart File Converter")
-
-    file = st.file_uploader("Upload your file", type=["pdf", "docx", "txt", "csv", "json", "xlsx", "jpg", "png"])
-
-    if file:
-        ext = file.name.split(".")[-1].lower()
-
-        # Auto-select conversion options based on file type
+    uploaded = st.file_uploader("Upload file", type=["pdf", "docx", "txt", "csv", "json", "xlsx"], key="file_uploader")
+    if uploaded:
+        ext = detect_ext(uploaded.name)
+        st.markdown(f"**Detected:** `{ext}`")
+        options = []
         if ext == "pdf":
-            conversions = ["PDF ➜ Word", "PDF ➜ Text"]
+            options = ["PDF ➜ Word (docx)", "PDF ➜ Text", "PDF ➜ PDF (same)"]
         elif ext == "docx":
-            conversions = ["Word ➜ PDF"]
+            options = ["Word ➜ PDF", "Word ➜ Text", "Word ➜ DOCX (same)"]
         elif ext == "csv":
-            conversions = ["CSV ➜ Excel", "CSV ➜ JSON"]
-        elif ext == "xlsx":
-            conversions = ["Excel ➜ CSV"]
+            options = ["CSV ➜ Excel", "CSV ➜ JSON", "CSV ➜ CSV (same)"]
+        elif ext in ("xlsx", "xls"):
+            options = ["Excel ➜ CSV", "Excel ➜ JSON", "Excel ➜ Excel (same)"]
         elif ext == "json":
-            conversions = ["JSON ➜ CSV"]
+            options = ["JSON ➜ CSV", "JSON ➜ Excel", "JSON ➜ JSON (same)"]
         else:
-            conversions = ["Unsupported conversion"]
+            st.error("Unsupported extension for converter.")
+            options = []
 
-        conversion_type = st.selectbox("Detected file type and possible conversions:", conversions)
+        conversion = st.selectbox("Choose conversion", options)
+        if st.button("Convert", key="convert"):
+            try:
+                prog = st.progress(0)
+                status = st.empty()
+                prog.progress(5)
+                orig_bytes = bytes_from_uploaded(uploaded)
+                prog.progress(15)
 
-        if "Unsupported" not in conversion_type:
-            if st.button("Convert Now"):
-                try:
-                    base_name = file.name.rsplit('.', 1)[0]
+                out_bytes = None
+                out_name = None
 
-                    if conversion_type == "PDF ➜ Text":
-                        reader = PdfReader(file)
-                        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-                        st.download_button(
-                            "Download TXT",
-                            text,
-                            file_name=f"{base_name}_converted.txt"
-                        )
+                # PDF conversions
+                if conversion == "PDF ➜ Text":
+                    status.text("Extracting text from PDF...")
+                    text = pdf_text_from_bytes(orig_bytes)
+                    out_bytes = text.encode("utf-8")
+                    out_name = make_filename(uploaded.name, "converted", "txt")
+                    prog.progress(90)
 
-                    elif conversion_type == "PDF ➜ Word":
-                        reader = PdfReader(file)
-                        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-                        doc = Document()
-                        doc.add_paragraph(text)
-                        buf = io.BytesIO()
-                        doc.save(buf)
-                        st.download_button(
-                            "Download DOCX",
-                            buf.getvalue(),
-                            file_name=f"{base_name}_converted.docx"
-                        )
+                elif conversion == "PDF ➜ Word (docx)":
+                    status.text("Extracting text from PDF...")
+                    text = pdf_text_from_bytes(orig_bytes)
+                    prog.progress(50)
+                    status.text("Generating DOCX...")
+                    out_bytes = docx_from_text(text)
+                    out_name = make_filename(uploaded.name, "converted", "docx")
+                    prog.progress(95)
 
-                    elif conversion_type == "Word ➜ PDF":
-                        doc = Document(file)
-                        text = "\n".join([p.text for p in doc.paragraphs])
-                        pdf_bytes = text.encode("utf-8")
-                        st.download_button(
-                            "Download PDF",
-                            pdf_bytes,
-                            file_name=f"{base_name}_converted.pdf"
-                        )
+                elif conversion == "PDF ➜ PDF (same)":
+                    out_bytes = orig_bytes
+                    out_name = make_filename(uploaded.name, "copy", "pdf")
+                    prog.progress(95)
 
-                    elif conversion_type == "CSV ➜ Excel":
-                        df = pd.read_csv(file)
-                        buf = io.BytesIO()
-                        df.to_excel(buf, index=False)
-                        st.download_button(
-                            "Download XLSX",
-                            buf.getvalue(),
-                            file_name=f"{base_name}_converted.xlsx"
-                        )
+                # Word conversions
+                elif conversion == "Word ➜ Text":
+                    status.text("Reading DOCX...")
+                    doc = Document(BytesIO(orig_bytes))
+                    text = "\n\n".join(p.text for p in doc.paragraphs)
+                    out_bytes = text.encode("utf-8")
+                    out_name = make_filename(uploaded.name, "converted", "txt")
+                    prog.progress(95)
 
-                    elif conversion_type == "Excel ➜ CSV":
-                        df = pd.read_excel(file)
-                        buf = io.BytesIO()
-                        df.to_csv(buf, index=False)
-                        st.download_button(
-                            "Download CSV",
-                            buf.getvalue(),
-                            file_name=f"{base_name}_converted.csv"
-                        )
+                elif conversion == "Word ➜ PDF":
+                    status.text("Reading DOCX...")
+                    doc = Document(BytesIO(orig_bytes))
+                    text = "\n\n".join(p.text for p in doc.paragraphs)
+                    status.text("Rendering PDF (text-only)...")
+                    out_bytes = pdf_from_text(text)
+                    out_name = make_filename(uploaded.name, "converted", "pdf")
+                    prog.progress(95)
 
-                    elif conversion_type == "CSV ➜ JSON":
-                        df = pd.read_csv(file)
-                        json_str = df.to_json(orient="records", indent=2)
-                        st.download_button(
-                            "Download JSON",
-                            json_str,
-                            file_name=f"{base_name}_converted.json"
-                        )
+                elif conversion == "Word ➜ DOCX (same)":
+                    out_bytes = orig_bytes
+                    out_name = make_filename(uploaded.name, "copy", "docx")
+                    prog.progress(95)
 
-                    elif conversion_type == "JSON ➜ CSV":
-                        data = json.load(file)
-                        df = pd.DataFrame(data)
-                        buf = io.BytesIO()
-                        df.to_csv(buf, index=False)
-                        st.download_button(
-                            "Download CSV",
-                            buf.getvalue(),
-                            file_name=f"{base_name}_converted.csv"
-                        )
+                # CSV / Excel / JSON conversions
+                elif conversion == "CSV ➜ Excel":
+                    status.text("Reading CSV...")
+                    df = pd.read_csv(BytesIO(orig_bytes))
+                    buf = BytesIO()
+                    df.to_excel(buf, index=False)
+                    out_bytes = buf.getvalue()
+                    out_name = make_filename(uploaded.name, "converted", "xlsx")
+                    prog.progress(95)
 
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                elif conversion == "CSV ➜ JSON":
+                    status.text("Reading CSV...")
+                    df = pd.read_csv(BytesIO(orig_bytes))
+                    out_bytes = df.to_json(orient="records", indent=2).encode("utf-8")
+                    out_name = make_filename(uploaded.name, "converted", "json")
+                    prog.progress(95)
 
-# =======================================
-# IMAGE RESIZER TAB
-# =======================================
+                elif conversion == "CSV ➜ CSV (same)":
+                    out_bytes = orig_bytes
+                    out_name = make_filename(uploaded.name, "copy", "csv")
+                    prog.progress(95)
+
+                elif conversion == "Excel ➜ CSV":
+                    status.text("Reading Excel...")
+                    df = pd.read_excel(BytesIO(orig_bytes))
+                    buf = BytesIO()
+                    df.to_csv(buf, index=False)
+                    out_bytes = buf.getvalue()
+                    out_name = make_filename(uploaded.name, "converted", "csv")
+                    prog.progress(95)
+
+                elif conversion == "Excel ➜ JSON":
+                    status.text("Reading Excel...")
+                    df = pd.read_excel(BytesIO(orig_bytes))
+                    out_bytes = df.to_json(orient="records", indent=2).encode("utf-8")
+                    out_name = make_filename(uploaded.name, "converted", "json")
+                    prog.progress(95)
+
+                elif conversion == "Excel ➜ Excel (same)":
+                    out_bytes = orig_bytes
+                    out_name = make_filename(uploaded.name, "copy", ext)
+
+                elif conversion == "JSON ➜ CSV":
+                    status.text("Reading JSON...")
+                    data = json.loads(orig_bytes.decode("utf-8"))
+                    df = pd.DataFrame(data)
+                    buf = BytesIO()
+                    df.to_csv(buf, index=False)
+                    out_bytes = buf.getvalue()
+                    out_name = make_filename(uploaded.name, "converted", "csv")
+                    prog.progress(95)
+
+                elif conversion == "JSON ➜ Excel":
+                    status.text("Reading JSON...")
+                    data = json.loads(orig_bytes.decode("utf-8"))
+                    df = pd.DataFrame(data)
+                    buf = BytesIO()
+                    df.to_excel(buf, index=False)
+                    out_bytes = buf.getvalue()
+                    out_name = make_filename(uploaded.name, "converted", "xlsx")
+                    prog.progress(95)
+
+                elif conversion == "JSON ➜ JSON (same)":
+                    out_bytes = orig_bytes
+                    out_name = make_filename(uploaded.name, "copy", "json")
+
+                else:
+                    st.error("Unsupported conversion selected.")
+                    out_bytes = None
+
+                prog.progress(100)
+                status.text("Conversion complete.")
+                if out_bytes:
+                    st.download_button("Download", data=out_bytes, file_name=out_name, key="download_conv")
+            except Exception as e:
+                st.error(f"Conversion failed: {e}")
+
+# -------- Image Resizer --------
 with tab2:
     st.subheader("Image Resizer")
-
-    img_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg", "bmp", "tiff"])
-    resize_mode = st.radio("Resize mode", ["By Dimensions", "By File Size (KB)"])
-
-    if img_file:
+    img_uploaded = st.file_uploader("Upload image", type=["png", "jpg", "jpeg", "bmp", "tiff"], key="img")
+    if img_uploaded:
         try:
-            image = Image.open(img_file)
+            img_bytes = bytes_from_uploaded(img_uploaded)
+            img = Image.open(BytesIO(img_bytes))
+            st.image(img, caption="Original", use_column_width=True)
 
-            # --- Resize by Dimensions ---
-            if resize_mode == "By Dimensions":
-                width = st.number_input("Width", min_value=1, value=image.width)
-                height = st.number_input("Height", min_value=1, value=image.height)
-                maintain_ratio = st.checkbox("Maintain aspect ratio", value=True)
-
-                if maintain_ratio:
-                    height = int(image.height * (width / image.width))
-
-                if st.button("Resize Now"):
-                    resized = image.resize((int(width), int(height)))
-                    buf = io.BytesIO()
-                    resized.save(buf, format=image.format or "PNG")
-                    st.image(resized, caption="Resized Image", use_column_width=True)
-                    st.download_button(
-                        "Download Image",
-                        buf.getvalue(),
-                        file_name=f"{img_file.name.rsplit('.',1)[0]}_resized.{(image.format or 'png').lower()}"
-                    )
-
-            # --- Resize by File Size (KB) ---
-            elif resize_mode == "By File Size (KB)":
-                target_kb = st.number_input("Target Size (KB)", min_value=10, max_value=5000, value=200)
-                if st.button("Compress Now"):
-                    buf = io.BytesIO()
+            mode = st.radio("Mode", ["By Dimensions", "By File Size (KB)"])
+            if mode == "By Dimensions":
+                width = st.number_input("Width (px)", value=img.width, min_value=1)
+                height = st.number_input("Height (px)", value=img.height, min_value=1)
+                maintain = st.checkbox("Maintain aspect ratio", value=True)
+                if maintain:
+                    height = int(img.height * (width / img.width))
+                if st.button("Resize", key="resize_btn"):
+                    prog = st.progress(0)
+                    prog.progress(10)
+                    resized = img.resize((int(width), int(height)))
+                    prog.progress(60)
+                    buf = BytesIO()
+                    fmt = (img.format or "PNG").upper()
+                    if fmt == "PNG":
+                        resized.save(buf, format="PNG")
+                        out_ext = "png"
+                        mime = "image/png"
+                    else:
+                        # save JPEG for other formats
+                        resized = resized.convert("RGB")
+                        resized.save(buf, format="JPEG", quality=95)
+                        out_ext = "jpg"
+                        mime = "image/jpeg"
+                    prog.progress(100)
+                    st.image(Image.open(BytesIO(buf.getvalue())), caption="Resized preview", use_column_width=True)
+                    st.download_button("Download Resized", data=buf.getvalue(),
+                                       file_name=make_filename(img_uploaded.name, "resized", out_ext),
+                                       mime=mime, key="download_resized")
+            else:
+                target_kb = st.number_input("Target size (KB)", min_value=10, max_value=10000, value=200)
+                if st.button("Compress", key="compress_btn"):
+                    prog = st.progress(0)
+                    prog.progress(5)
+                    working = img.convert("RGB")
+                    buf = BytesIO()
                     quality = 95
-                    image = image.convert("RGB")
-
+                    size_kb = None
                     while quality > 5:
                         buf.truncate(0)
                         buf.seek(0)
-                        image.save(buf, format="JPEG", quality=quality)
+                        working.save(buf, format="JPEG", quality=quality)
                         size_kb = len(buf.getvalue()) / 1024
+                        prog.progress(int(5 + 90 * (95 - quality) / 90))
                         if size_kb <= target_kb:
                             break
                         quality -= 5
-
+                    prog.progress(100)
                     st.success(f"Compressed to ~{int(size_kb)} KB at quality {quality}")
-                    st.image(image, caption="Compressed Image", use_column_width=True)
-                    st.download_button(
-                        "Download Compressed Image",
-                        buf.getvalue(),
-                        file_name=f"{img_file.name.rsplit('.',1)[0]}_compressed.jpg",
-                        mime="image/jpeg"
-                    )
-
+                    st.image(Image.open(BytesIO(buf.getvalue())), caption="Compressed preview", use_column_width=True)
+                    st.download_button("Download Compressed", data=buf.getvalue(),
+                                       file_name=make_filename(img_uploaded.name, "compressed", "jpg"),
+                                       mime="image/jpeg", key="download_compressed")
         except Exception as e:
-            st.error(f"Error processing image: {e}")
+            st.error(f"Image processing failed: {e}")
