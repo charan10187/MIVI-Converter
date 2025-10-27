@@ -1,186 +1,167 @@
 import streamlit as st
-import os
-import tempfile
 from pathlib import Path
-from docx2pdf import convert as docx2pdf_convert
 from pdf2docx import Converter
-from pdf2image import convert_from_path
-from PyPDF2 import PdfReader
 from PIL import Image
 import pandas as pd
 import json
-import shutil
-import sys
+import tempfile
+import os
+from docx import Document
+from fpdf import FPDF
+from pdf2image import convert_from_path
 
-# Auto-configure Poppler path if on Windows
-if sys.platform.startswith("win"):
-    poppler_path = Path("C:/poppler/Library/bin")
-    if not poppler_path.exists():
-        os.makedirs(poppler_path, exist_ok=True)
-    os.environ["PATH"] += os.pathsep + str(poppler_path)
-
-st.set_page_config(page_title=" MIVI Universal Converter", layout="wide")
-st.title("📂 MIVI Universal File Converter 🗃️")
-st.caption("Developed by **S. Sri Charan**  |  📧 [charan10187@gmail.com](mailto:charan10187@gmail.com)")
+st.set_page_config(page_title="EZIPZ File Converter", layout="wide")
+st.title("📂 MIVI CONVERTER 🗃️")
+st.markdown("Developed by **S. Sri Charan** | 📧 [charan10187@gmail.com](mailto:charan10187@gmail.com)")
 
 tab1, tab2 = st.tabs(["📄 File Converter", "🖼️ Image Resizer"])
 
-# ============================ FILE CONVERTER ============================ #
+# ========== FILE CONVERTER ==========
 with tab1:
     st.header("📄 Smart File Converter")
-    uploaded_file = st.file_uploader("Upload any file", type=None)
+    uploaded = st.file_uploader("Upload any file", type=None)
 
-    if uploaded_file:
-        input_name = uploaded_file.name
-        input_ext = input_name.split(".")[-1].lower()
+    if uploaded:
+        in_name = uploaded.name
+        in_ext = in_name.split(".")[-1].lower()
 
-        options = []
-        if input_ext in ["pdf"]:
-            options = ["docx", "jpg", "png", "txt"]
-        elif input_ext in ["docx", "doc"]:
-            options = ["pdf"]
-        elif input_ext in ["png", "jpg", "jpeg", "bmp", "tiff"]:
-            options = ["pdf"]
-        elif input_ext in ["csv"]:
-            options = ["xlsx", "json"]
-        elif input_ext in ["json"]:
-            options = ["xlsx", "csv"]
+        # Dynamic output options
+        format_map = {
+            "pdf": ["docx", "txt", "jpg"],
+            "docx": ["pdf"],
+            "png": ["pdf"],
+            "jpg": ["pdf"],
+            "jpeg": ["pdf"],
+            "csv": ["json", "xlsx"],
+            "json": ["csv", "xlsx"],
+            "xlsx": ["csv", "json"],
+        }
+        options = format_map.get(in_ext, [])
+        if not options:
+            st.warning("⚠️ Unsupported file type.")
         else:
-            options = ["pdf"]
+            out_fmt = st.selectbox("Convert to", options)
 
-        output_format = st.selectbox("Choose output format", options)
+            if st.button("🚀 Convert Now"):
+                try:
+                    with tempfile.TemporaryDirectory() as tmp:
+                        in_path = os.path.join(tmp, in_name)
+                        with open(in_path, "wb") as f:
+                            f.write(uploaded.read())
 
-        if st.button("Convert Now"):
-            try:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    input_path = os.path.join(tmpdir, input_name)
-                    with open(input_path, "wb") as f:
-                        f.write(uploaded_file.read())
+                        out_path = os.path.join(tmp, Path(in_name).stem + f".{out_fmt}")
 
-                    output_path = None
+                        # ========== Conversion Logic ==========
+                        # PDF → DOCX
+                        if in_ext == "pdf" and out_fmt == "docx":
+                            cv = Converter(in_path)
+                            cv.convert(out_path)
+                            cv.close()
 
-                    # DOCX → PDF
-                    if input_ext in ["docx", "doc"] and output_format == "pdf":
-                        docx2pdf_convert(input_path, tmpdir)
-                        output_path = os.path.join(tmpdir, Path(input_name).stem + ".pdf")
+                        # PDF → TXT
+                        elif in_ext == "pdf" and out_fmt == "txt":
+                            from PyPDF2 import PdfReader
+                            reader = PdfReader(in_path)
+                            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                            with open(out_path, "w", encoding="utf-8") as f:
+                                f.write(text)
 
-                    # PDF → DOCX
-                    elif input_ext == "pdf" and output_format == "docx":
-                        output_path = os.path.join(tmpdir, Path(input_name).stem + ".docx")
-                        cv = Converter(input_path)
-                        cv.convert(output_path)
-                        cv.close()
+                        # PDF → Image (JPG)
+                        elif in_ext == "pdf" and out_fmt == "jpg":
+                            pages = convert_from_path(in_path, 300)
+                            pages[0].save(out_path, "JPEG")
 
-                    # PDF → Images (JPG/PNG)
-                    elif input_ext == "pdf" and output_format in ["jpg", "png"]:
-                        pages = convert_from_path(input_path, poppler_path=poppler_path)
-                        output_dir = os.path.join(tmpdir, "pdf_images")
-                        os.makedirs(output_dir, exist_ok=True)
-                        for i, page in enumerate(pages):
-                            page_path = os.path.join(output_dir, f"page_{i+1}.{output_format}")
-                            page.save(page_path, output_format.upper())
-                        shutil.make_archive(output_dir, 'zip', output_dir)
-                        output_path = output_dir + ".zip"
+                        # DOCX → PDF
+                        elif in_ext == "docx" and out_fmt == "pdf":
+                            doc = Document(in_path)
+                            pdf = FPDF()
+                            pdf.add_page()
+                            pdf.set_font("Arial", size=12)
+                            for para in doc.paragraphs:
+                                pdf.multi_cell(0, 10, para.text)
+                            pdf.output(out_path)
 
-                    # PDF → Text
-                    elif input_ext == "pdf" and output_format == "txt":
-                        reader = PdfReader(input_path)
-                        text = "\n".join([page.extract_text() or "" for page in reader.pages])
-                        output_path = os.path.join(tmpdir, Path(input_name).stem + ".txt")
-                        with open(output_path, "w", encoding="utf-8") as f:
-                            f.write(text)
+                        # Image → PDF
+                        elif in_ext in ["png", "jpg", "jpeg"] and out_fmt == "pdf":
+                            img = Image.open(in_path).convert("RGB")
+                            img.save(out_path)
 
-                    # Image → PDF
-                    elif input_ext in ["png", "jpg", "jpeg", "bmp", "tiff"] and output_format == "pdf":
-                        img = Image.open(input_path).convert("RGB")
-                        output_path = os.path.join(tmpdir, Path(input_name).stem + ".pdf")
-                        img.save(output_path)
+                        # CSV ↔ JSON ↔ XLSX
+                        elif in_ext == "csv" and out_fmt == "json":
+                            df = pd.read_csv(in_path)
+                            df.to_json(out_path, orient="records", indent=4)
 
-                    # CSV → Excel or JSON
-                    elif input_ext == "csv" and output_format == "xlsx":
-                        df = pd.read_csv(input_path)
-                        output_path = os.path.join(tmpdir, Path(input_name).stem + ".xlsx")
-                        df.to_excel(output_path, index=False)
-                    elif input_ext == "csv" and output_format == "json":
-                        df = pd.read_csv(input_path)
-                        output_path = os.path.join(tmpdir, Path(input_name).stem + ".json")
-                        df.to_json(output_path, orient="records", indent=2)
+                        elif in_ext == "json" and out_fmt == "csv":
+                            df = pd.read_json(in_path)
+                            df.to_csv(out_path, index=False)
 
-                    # JSON → Excel or CSV
-                    elif input_ext == "json" and output_format in ["xlsx", "csv"]:
-                        with open(input_path, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                        df = pd.DataFrame(data)
-                        if output_format == "xlsx":
-                            output_path = os.path.join(tmpdir, Path(input_name).stem + ".xlsx")
-                            df.to_excel(output_path, index=False)
+                        elif in_ext == "csv" and out_fmt == "xlsx":
+                            df = pd.read_csv(in_path)
+                            df.to_excel(out_path, index=False)
+
+                        elif in_ext == "xlsx" and out_fmt == "csv":
+                            df = pd.read_excel(in_path)
+                            df.to_csv(out_path, index=False)
+
+                        elif in_ext == "json" and out_fmt == "xlsx":
+                            df = pd.read_json(in_path)
+                            df.to_excel(out_path, index=False)
+
+                        elif in_ext == "xlsx" and out_fmt == "json":
+                            df = pd.read_excel(in_path)
+                            df.to_json(out_path, orient="records", indent=4)
+
+                        # =====================================
+
+                        if os.path.exists(out_path):
+                            with open(out_path, "rb") as f:
+                                st.download_button(
+                                    label="📥 Download Converted File",
+                                    data=f,
+                                    file_name=os.path.basename(out_path),
+                                    mime="application/octet-stream",
+                                )
                         else:
-                            output_path = os.path.join(tmpdir, Path(input_name).stem + ".csv")
-                            df.to_csv(output_path, index=False)
+                            st.error("❌ Conversion failed.")
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
 
-                    if output_path and os.path.exists(output_path):
-                        with open(output_path, "rb") as f:
-                            st.download_button(
-                                label="📥 Download Converted File",
-                                data=f,
-                                file_name=os.path.basename(output_path),
-                                mime="application/octet-stream",
-                            )
-                    else:
-                        st.error("❌ Conversion failed or file not found.")
-
-            except Exception as e:
-                st.error(f"❌ Error during conversion: {e}")
-
-# ============================ IMAGE RESIZER ============================ #
+# ========== IMAGE RESIZER ==========
 with tab2:
     st.header("🖼️ Image Resizer")
-    img_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg", "bmp", "tiff"])
-
+    img_file = st.file_uploader("Upload image", type=["png", "jpg", "jpeg", "bmp", "tiff"])
     if img_file:
         img = Image.open(img_file)
-        st.image(img, caption="Original Image", use_container_width=True)
+        st.image(img, caption="Original", use_container_width=True)
 
-        resize_type = st.radio("Resize Type", ["By Dimensions", "By File Size (KB)"])
+        mode = st.radio("Resize mode", ["By Dimensions", "By File Size (KB)"])
 
-        if resize_type == "By Dimensions":
-            width = st.number_input("Width (px)", value=img.width, min_value=1)
-            height = st.number_input("Height (px)", value=img.height, min_value=1)
-            maintain_ratio = st.checkbox("Maintain aspect ratio", value=True)
-            if maintain_ratio:
-                height = int(img.height * (width / img.width))
+        if mode == "By Dimensions":
+            w = st.number_input("Width (px)", value=img.width, min_value=1)
+            h = st.number_input("Height (px)", value=img.height, min_value=1)
+            keep_ratio = st.checkbox("Keep aspect ratio", True)
 
-            if st.button("Resize Now"):
-                resized_img = img.resize((int(width), int(height)))
-                st.image(resized_img, caption="Resized Image", use_container_width=True)
+            if keep_ratio:
+                h = int(img.height * (w / img.width))
 
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmpfile:
-                    resized_img.save(tmpfile.name, format="JPEG", quality=95)
-                    with open(tmpfile.name, "rb") as f:
-                        st.download_button(
-                            "📥 Download Resized Image",
-                            f,
-                            file_name=f"resized_{img_file.name}",
-                            mime="image/jpeg",
-                        )
+            if st.button("Resize"):
+                resized = img.resize((int(w), int(h)))
+                st.image(resized, caption="Resized", use_container_width=True)
+
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+                resized.save(tmp.name, "JPEG", quality=95)
+                with open(tmp.name, "rb") as f:
+                    st.download_button("📥 Download Resized Image", f, file_name="resized.jpg")
 
         else:
-            target_kb = st.number_input("Target size (KB)", min_value=10, max_value=5000, value=200)
-            if st.button("Compress Now"):
-                temp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-                quality = 95
-                while quality > 5:
-                    img.save(temp.name, format="JPEG", quality=quality)
-                    size_kb = os.path.getsize(temp.name) / 1024
-                    if size_kb <= target_kb:
+            target_kb = st.number_input("Target Size (KB)", 10, 5000, 200)
+            if st.button("Compress"):
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+                q = 95
+                while q > 5:
+                    img.save(tmp.name, "JPEG", quality=q)
+                    if os.path.getsize(tmp.name) / 1024 <= target_kb:
                         break
-                    quality -= 5
-
-                st.success(f"✅ Compressed to ~{int(size_kb)} KB at quality {quality}")
-                with open(temp.name, "rb") as f:
-                    st.download_button(
-                        "📥 Download Compressed Image",
-                        f,
-                        file_name=f"compressed_{img_file.name}",
-                        mime="image/jpeg",
-                    )
+                    q -= 5
+                with open(tmp.name, "rb") as f:
+                    st.download_button("📥 Download Compressed", f, file_name="compressed.jpg")

@@ -1,10 +1,9 @@
 streamlit
-python-docx
-docx2pdf
 pdf2docx
-pdf2image
-PyPDF2
-pandas
-openpyxl
 Pillow
-reportlab   
+pandas
+fpdf
+docx
+PyPDF2
+pdf2image
+openpyxl
