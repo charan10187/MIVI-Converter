@@ -4,8 +4,8 @@ pandas
 openpyxl
 python-docx
 pdf2docx
-docx2pdf
 PyPDF2
 reportlab
 pytesseract
 pdf2image
+pypandoc

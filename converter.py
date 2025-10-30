@@ -7,8 +7,9 @@ from io import BytesIO
 import tempfile
 import os
 import shutil
+import platform
+import pypandoc
 from pdf2docx import Converter
-from docx2pdf import convert as docx_to_pdf
 from PyPDF2 import PdfReader
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -28,7 +29,6 @@ try:
 except Exception:
     OCR_AVAILABLE = False
 
-# ---------------------- PAGE CONFIG ----------------------
 st.set_page_config(page_title="MIVI Universal Converter", page_icon="📂", layout="wide")
 
 st.title("📂 MIVI Universal File Converter 🗃")
@@ -38,14 +38,7 @@ st.markdown(
     "Cloud links (Google Drive, Dropbox, OneDrive) are not accepted. "
     "Download them first before uploading here."
 )
-
-# ---------------------- UI Tabs ----------------------
 tab1, tab2 = st.tabs(["🖼 Image Resizer", "📄 File Converter"])
-
-
-# ================================================================
-#  IMAGE RESIZER TAB
-# ================================================================
 with tab1:
     st.subheader("Resize Your Images Easily")
 
@@ -267,23 +260,33 @@ with tab2:
                     elif conversion_type == "Word ➜ PDF":
                         status.text("Converting Word to PDF... please wait.")
                         docx_path = os.path.join(tmp_dir, "input.docx")
+                        pdf_output = os.path.join(tmp_dir, f"{file_base}_converted.pdf")
 
                         with open(docx_path, "wb") as f:
                             f.write(uploaded_file.getbuffer())
 
                         progress.progress(40)
-                        docx_to_pdf(docx_path, tmp_dir)
-                        pdf_output = os.path.join(tmp_dir, "input.pdf")
-                        progress.progress(100)
 
-                        with open(pdf_output, "rb") as f:
-                            st.download_button(
-                                "📥 Download Converted PDF",
-                                f,
-                                file_name=f"{file_base}_converted.pdf",
-                                mime="application/pdf",
+                        try:
+                            pypandoc.convert_file(
+                                docx_path,
+                                "pdf",
+                                outputfile=pdf_output,
+                                extra_args=["--pdf-engine=xelatex", "--standalone"]
                             )
-                        status.text("✅ Word converted to PDF with original formatting!")
+                            progress.progress(100)
+                            with open(pdf_output, "rb") as f:
+                                st.download_button(
+                                    "📥 Download Converted PDF",
+                                    f,
+                                    file_name=f"{file_base}_converted.pdf",
+                                    mime="application/pdf",
+                                )
+                            status.text("✅ Word converted to PDF with formatting preserved.")
+                        except Exception as e:
+                            st.error(f"❌ Conversion failed: {e}")
+
+
 
                     # ---------------- PDF ➜ TEXT ----------------
                     elif conversion_type == "PDF ➜ Text":
